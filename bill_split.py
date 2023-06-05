@@ -194,8 +194,9 @@ def finalize_names(items: dict[str, list[Person]], aliases: dict[str, set[str]])
     for item, names in items.copy().items():
         final_names: Counter[str] = Counter()
         removed_names = Counter()
-        if any(name == EVERYONE or name.negate for name in names):
-            # need to add EVERYONE to the counter because of negations
+        if any(name.negate for name in names) and not any(('@' in name.name) for name in names):
+            # if there are negations, and no alias has been provided, 
+            # need to add EVERYONE implicitly. the negations will be removed later
             final_names.update(aliases[EVERYONE_NAME])
         # first, expand all the aliases
         expanded_names = []
@@ -215,6 +216,7 @@ def finalize_names(items: dict[str, list[Person]], aliases: dict[str, set[str]])
                 final_names[person.name] += person.multiplier
         final_names -= removed_names
         assert not any(name.startswith("@") for name in final_names), "found alias in final_names"
+        assert all(count >= 0 for count in final_names.values()), "got negative contribution"
         final_items[item] = final_names
     return final_items
 
