@@ -1,6 +1,6 @@
 """
-This is a simple tool to split the bill expenses among various people.
-It's main inputs are
+This is a simple script to split bill expenses among various people.
+Its main inputs are
 1. A TSV file of Bill with columns- quantity,name,price. Usually OCR'd from some service
     The first line of the bill should look like "!paid: 1234.00"
     This will be used to account for any taxes/discounts in the final paid amount.
