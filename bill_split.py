@@ -57,21 +57,22 @@ def parse_bill(path: Path):
     lines = bill_data.splitlines()
 
     # first parse the !paid directive
-    assert lines[0].strip().startswith("!paid"), \
-        "First line should be paid amount directive. Eg: '!paid: 1234.00'"
+    assert (
+        lines[0].strip().startswith("!paid")
+    ), "First line should be paid amount directive. Eg: '!paid: 1234.00'"
     total_paid = Fraction(lines[0].split(":")[1].strip())
 
     # now parse the item lines
     bill_data2 = DictReader(
         [line for line in lines if line.strip() and not line.startswith("!")],
         fieldnames=["quantity", "name", "price"],
-        dialect=csv.excel_tab)
+        dialect=csv.excel_tab,
+    )
 
-    items = [BillItem(
-                r['name'],
-                Fraction(r['price'].replace(',', '')),
-                int(r['quantity']))
-             for r in bill_data2]
+    items = [
+        BillItem(r['name'], Fraction(r['price'].replace(',', '')), int(r['quantity']))
+        for r in bill_data2
+    ]
     # adjust the prices based on actual amount paid
     item_sum = sum(item.price for item in items)
     price_mult = total_paid / item_sum
@@ -121,8 +122,7 @@ def parse_people(names_str: str) -> tuple[list[Person], list[Person]]:
 
 def parse_expenses(data: str):
     cat_people = None
-    cat_aliases = None    
-    # people = set()
+    cat_aliases = None
     aliases = defaultdict(set)
     items: dict[str, list[Person]] = {}
     for line in data.splitlines():
@@ -157,7 +157,11 @@ def parse_expenses(data: str):
         split = line.split(":")
         item_name = split[0].strip()
         if len(split) == 1:
-            assert cat_people is not None and cat_aliases is not None and (cat_people or cat_aliases), f"no category people/aliases defined for food item {line}"
+            assert (
+                cat_people is not None
+                and cat_aliases is not None
+                and (cat_people or cat_aliases)
+            ), f"no category people/aliases defined for food item {line}"
             cur_all = cat_people + cat_aliases
         else:
             cur_people, cur_aliases = parse_people(split[1].strip())
@@ -193,8 +197,10 @@ def finalize_names(items: dict[str, list[Person]], aliases: dict[str, set[str]])
     for item, names in items.copy().items():
         final_names: Counter[str] = Counter()
         removed_names = Counter()
-        if any(name.negate for name in names) and not any(('@' in name.name) for name in names):
-            # if there are negations, and no alias has been provided, 
+        if any(name.negate for name in names) and not any(
+            ('@' in name.name) for name in names
+        ):
+            # if there are negations, and no alias has been provided,
             # need to add EVERYONE implicitly. the negations will be removed later
             final_names.update(aliases[EVERYONE_NAME])
         # first, expand all the aliases
@@ -212,8 +218,12 @@ def finalize_names(items: dict[str, list[Person]], aliases: dict[str, set[str]])
             else:
                 final_names[person.name] += person.multiplier
         final_names -= removed_names
-        assert not any(name.startswith("@") for name in final_names), "found alias in final_names"
-        assert all(count >= 0 for count in final_names.values()), "got negative contribution"
+        assert not any(
+            name.startswith("@") for name in final_names
+        ), "found alias in final_names"
+        assert all(
+            count >= 0 for count in final_names.values()
+        ), "got negative contribution"
         final_items[item] = final_names
     return final_items
 
@@ -241,7 +251,14 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
             details[person][bill_item.name] = share
     print("total", float(sum(shares.values())))
     pprint({name: round(float(share), 2) for name, share in shares.items()})
-    pprint(dict({p: {n: round(float(v), 2) for n, v in items.items()} for p, items in details.items()}))
+    pprint(
+        dict(
+            {
+                p: {n: round(float(v), 2) for n, v in items.items()}
+                for p, items in details.items()
+            }
+        )
+    )
 
 
 bill = parse_bill(bill_path)
