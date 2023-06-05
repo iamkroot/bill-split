@@ -166,7 +166,6 @@ def parse_expenses(data: str):
         items[item_name] = cur_all
 
     aliases = resolve_aliases(aliases)
-    # TODO: finalize_names should handle all aliases, not just @everyone
     return finalize_names(items, aliases)
 
 
@@ -210,8 +209,6 @@ def finalize_names(items: dict[str, list[Person]], aliases: dict[str, set[str]])
         for person in expanded_names:
             if person.negate:
                 removed_names[person.name] += person.multiplier
-            elif person == EVERYONE:
-                continue
             else:
                 final_names[person.name] += person.multiplier
         final_names -= removed_names
