@@ -76,6 +76,7 @@ def parse_bill(path: Path):
     # adjust the prices based on actual amount paid
     item_sum = sum(item.price for item in items)
     price_mult = total_paid / item_sum
+    print(f"bill sum: {float(item_sum):.2f}")
     return [item.scale_price(price_mult) for item in items]
 
 
@@ -244,6 +245,7 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
         matches = get_close_matches(bill_item.name, candidates, n=1, cutoff=0.3)
         assert matches, f"no match for {bill_item} in {', '.join(candidates)}"
         people = items[matches[0]]
+        assert people.total(), f"No person for {bill_item}"
         per_person = bill_item.price / Fraction(people.total())
         for person, mult in people.items():
             share = per_person * Fraction(mult)
