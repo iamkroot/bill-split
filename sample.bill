@@ -1,0 +1,22 @@
+!paid: 7000.00
+
+! any line that starts with a '!' is ignored after this point
+! so we can use it to add some metadata, such as mentioning the person who paid (the script doesn't care about this)
+
+!paid-by: Kurapika
+
+! now, onto the actual bill
+! the columns are-
+!qty	name	price
+
+1	Hisoka Potato Fondue	1080.00
+1	Phink's Cappucino	500.00
+2	Franklin's Apple Drink	1000.00
+! note that the price column should be total price for that item - here, a single Apple Drink costs 500.
+1	Uvogin's Spare Rib Curry	1500.00
+3	Kortopi's Dessert Plate	2100.00
+
+! note that the total only comes out to be 6180.00, but the top line says 7000.00
+! this is to account for any additional taxes or discounts. The script will automatically scale each item's price according to the final amount in paid-by line.
+
+! PS: the items are taken from https://twitter.com/HxHSource/status/973134242916937728/photo/1

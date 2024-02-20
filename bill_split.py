@@ -38,8 +38,13 @@ from pathlib import Path
 from pprint import pprint
 from typing import Iterable
 
-bill_path = Path("./bill.txt")
-expenses_data = Path("./expenses.txt").read_text()
+# This is the ONLY variable that you need to change.
+# could even be a file inside a directory, like "./bills/Greed Island/foo"
+# just ensure that foo.bill and foo.expenses exist in that directory
+BASE_PATH = Path("sample")
+
+bill_path = BASE_PATH.with_suffix(".bill")
+expenses_data = BASE_PATH.with_suffix(".expenses").read_text()
 
 
 @dataclass
@@ -128,6 +133,10 @@ def parse_expenses(data: str):
     items: dict[str, list[Person]] = {}
     for line in data.splitlines():
         if not line:
+            continue
+
+        if line.startswith('!'):
+            # this is a comment line
             continue
 
         if line.startswith('@'):

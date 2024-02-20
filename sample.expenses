@@ -1,0 +1,23 @@
+! any line that starts with '!' is a comment line, and is ignored
+
+! can use @foo to create groups of people
+@kids: Gon, Killua
+
+! lines with '#' are categories (completely optional)
+# drinks
+Phink's Cappucino: Killua
+
+! names need no be an exact match to the bill... We do some fuzzy-matching
+Franklin Apple Drink: Leorio, Kurapika
+
+! If we write the people names next to a category, the shares will be applied to all items in that category
+! @everyone is a special alias that will expand to all names mentioned in this doc
+# food: @everyone
+Uvogin's Spare Rib Curry
+
+! can add a multiplier to specify unequal split
+! in this case, Gon will be assigned 25% of price, Killua will get 25% and Leorio will get 50%
+Kortopi's Dessert Plate: @kids, Leorio x2
+
+! Can prepend a '-' to exclude a person from the group
+Hisoka Fondue: @kids, -Gon
