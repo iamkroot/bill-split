@@ -19,7 +19,7 @@ Its main inputs are
 
     # main course
     pizza: -Gon, Ging x3 (Gon didn't eat it, Ging had thrice as much as others)
-    pasta: everyone
+    pasta: @everyone
     fried rice: -Kurapika (everyone except Kurapika ate this)
 
 The names of items in the description should closely match the names in the bill.
