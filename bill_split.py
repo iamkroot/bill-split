@@ -35,8 +35,13 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from fractions import Fraction
 from pathlib import Path
-from pprint import pprint
+from pprint import pformat, pprint
 from typing import Iterable
+
+try:
+    from tkinter import Tk
+except ImportError:
+    Tk = None
 
 # This is the ONLY variable that you need to change.
 # could even be a file inside a directory, like "./bills/Greed Island/foo"
@@ -261,7 +266,9 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
             shares[person] += share
             details[person][bill_item.name] = share
     print("total", float(sum(shares.values())))
-    pprint({name: round(float(share), 2) for name, share in shares.items()})
+    totals = {name: round(float(share), 2) for name, share in shares.items()}
+    pprint(totals)
+    copy_to_clipboard(pformat(totals))
     pprint(
         dict(
             {
@@ -272,6 +279,21 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
     )
 
 
-bill = parse_bill(bill_path)
-items = parse_expenses(expenses_data)
-assign_shares(items, bill)
+def copy_to_clipboard(msg: str):
+    if Tk is not None:
+        tk = Tk()
+        tk.withdraw()
+        tk.clipboard_clear()
+        tk.clipboard_append(msg)
+        tk.update()
+        tk.destroy()
+
+
+def main():
+    bill = parse_bill(bill_path)
+    items = parse_expenses(expenses_data)
+    assign_shares(items, bill)
+
+
+if __name__ == '__main__':
+    main()
