@@ -29,6 +29,7 @@ Final output will be each person's share to the total amount in the bill.
 
 import csv
 import re
+import random
 from collections import Counter, defaultdict
 from csv import DictReader
 from dataclasses import dataclass
@@ -247,6 +248,22 @@ def is_sampler(name):
     return name.lower().startswith("sampler")
 
 
+def round_totals(shares):
+    """Handle float roundoff errors that cause shares to not sum to the total"""
+    total = float(sum(shares.values()))
+    print("total", total)
+    totals = {name: round(float(share), 2) for name, share in shares.items()}
+    delta = round(sum(totals.values()) - total, 2)
+    if delta != 0:
+        if delta > 0.5:
+            print(f"Warning! something is very wrong!! {delta=}")
+            raise ArithmeticError
+        person = random.choice(tuple(totals.keys()))
+        print(f"Rounding off {person} by {delta}")
+        totals[person] = round(totals[person] - delta, 2)
+    assert round(sum(totals.values()) - total, 2) == 0, f"Failed to round off the {shares=}"
+    return totals
+
 def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
     samplers = [name for name in items.keys() if is_sampler(name)]
     shares = defaultdict(Fraction)
@@ -265,8 +282,8 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
             share = per_person * Fraction(mult)
             shares[person] += share
             details[person][bill_item.name] = share
-    print("total", float(sum(shares.values())))
-    totals = {name: round(float(share), 2) for name, share in shares.items()}
+
+    totals = round_totals(shares)
     pprint(totals)
     copy_to_clipboard(pformat(totals))
     pprint(
@@ -290,6 +307,8 @@ def copy_to_clipboard(msg: str):
 
 
 def main():
+    # make the RNG consistent for a given bill
+    random.seed(str(bill_path))
     bill = parse_bill(bill_path)
     items = parse_expenses(expenses_data)
     assign_shares(items, bill)
