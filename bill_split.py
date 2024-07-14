@@ -36,19 +36,21 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from fractions import Fraction
 from pathlib import Path
-from pprint import pformat, pprint
+from pprint import pprint
 from typing import Iterable
 
-try:
-    from tkinter import Tk
-except ImportError:
-    Tk = None
-
-# This is the ONLY variable that you need to change.
+# These are the ONLY variables that you need to change.
 # could even be a file inside a directory, like "./bills/Greed Island/foo"
 # just ensure that foo.bill and foo.expenses exist in that directory
 BASE_PATH = Path("sample")
+# This file specifies a mapping from expenses name (like "kurapika") to a 
+# beancount account name (like "Assets:Receivable:Friends:Kurapika")
+# Used to autogenerate the beancount posting for this txns.
+# 
+# Completely optional. Will be skipped if this file is not found.
+BEANNAMES_FILE = Path("beannames.txt")
 
+# no need to edit any of these
 bill_path = BASE_PATH.with_suffix(".bill")
 expenses_data = BASE_PATH.with_suffix(".expenses").read_text()
 
@@ -88,7 +90,7 @@ def parse_bill(path: Path):
     item_sum = sum(item.price for item in items)
     price_mult = total_paid / item_sum
     print(f"bill sum: {float(item_sum):.2f}")
-    return [item.scale_price(price_mult) for item in items]
+    return total_paid, [item.scale_price(price_mult) for item in items]
 
 
 EVERYONE_NAME = "@everyone"
@@ -273,7 +275,7 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
         candidates = items.keys()
         if is_sampler(bill_item.name):
             candidates = samplers
-        matches = get_close_matches(bill_item.name, candidates, n=1, cutoff=0.3)
+        matches = get_close_matches(bill_item.name, candidates, n=1, cutoff=0.5)
         assert matches, f"no match for {bill_item} in {', '.join(candidates)}"
         people = items[matches[0]]
         assert people.total(), f"No person for {bill_item}"
@@ -285,7 +287,6 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
 
     totals = round_totals(shares)
     pprint(totals)
-    copy_to_clipboard(pformat(totals))
     pprint(
         dict(
             {
@@ -294,24 +295,76 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
             }
         )
     )
+    return totals
 
 
-def copy_to_clipboard(msg: str):
-    if Tk is not None:
-        tk = Tk()
-        tk.withdraw()
-        tk.clipboard_clear()
-        tk.clipboard_append(msg)
-        tk.update()
-        tk.destroy()
+def gen_beancount_postings(total_paid: Fraction, totals: dict, expenses_data: str):
+    account_names = {}
+    my_name = None
+    unknown_name = None
+    total_name = None
+
+    def parse_kv(line, prefix):
+        return tuple(a.strip() for a in line.removeprefix(prefix).strip().split("="))
+
+    # parse the expenses to get !bean-name directives
+    for line in expenses_data.splitlines():
+        if line.startswith("!bean-name:"):
+            try:
+                name, account = parse_kv(line, "!bean-name:")
+            except ValueError as e:
+                print(f"Failed to parse bean name at {line}: {e}")
+                return
+            account_names[name] = account
+        elif line.startswith("!bean-name-me:"):
+            try:
+                my_name = parse_kv(line, "!bean-name-me:")
+            except ValueError as e:
+                print(f"Failed to parse bean name at {line}: {e}")
+                return
+        elif line.startswith("!bean-unknown:"):
+            unknown_name = line.removeprefix("!bean-unknown:").strip()
+        elif line.startswith("!bean-total:"):
+            total_name = line.removeprefix("!bean-total:").strip()
+
+
+    if not all(name in account_names for name in totals if (my_name is None or my_name[0] != name)):
+        print("Missing some bean-names!!")
+        for missing_name in set(totals) - set(account_names):
+            print(missing_name, totals[missing_name])
+        if unknown_name is None:
+            print("If you still want to generate postings, specify !bean-name-unknown with some generic account name")
+    else:
+        # don't care about this, get around type checker
+        unknown_name = None
+
+    # start printing
+    print("Beancount postings:")
+    if total_name is not None:
+        print(total_name, -float(total_paid), "USD")
+
+    for bill_name, total in totals.items():
+        if my_name is not None and bill_name == my_name[0]:
+            # will print this at the end
+            continue
+        try:
+            acc_name = account_names[bill_name]
+        except KeyError:    
+            acc_name = bill_name
+        print(acc_name, total, "USD")
+    if my_name is not None:
+        assert my_name[0] in totals, f"My name {my_name[0]} not found in {totals=}"
+        print(my_name[1])
 
 
 def main():
     # make the RNG consistent for a given bill
     random.seed(str(bill_path))
-    bill = parse_bill(bill_path)
+    total_paid, bill = parse_bill(bill_path)
     items = parse_expenses(expenses_data)
-    assign_shares(items, bill)
+    totals = assign_shares(items, bill)
+    if BEANNAMES_FILE.exists():
+        gen_beancount_postings(total_paid, totals, BEANNAMES_FILE.read_text())
 
 
 if __name__ == '__main__':
