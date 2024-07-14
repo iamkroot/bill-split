@@ -79,9 +79,11 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
 
     def on_bill_contents(self, path: Path, contents: str):
         """Create the new path.bill and path.expenses files based on contents of bill."""
-        if not contents.strip().startswith("!paid"):
-            self.window.status_message("Invalid contents! Should be a bill file.")
-            return
+        paid_present = False
+        if contents.strip().startswith("!paid:"):
+            # self.window.status_message("Invalid contents! Should be a bill file.")
+            paid_present = True
+            # return
         
         items = self.get_bill_items(contents)
         if not items:
@@ -94,7 +96,8 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
         bill_group, expenses_group = ((-1, -1), (0, 1))[self.window.num_groups() == 2]
 
         # create {path}.bill from contents and open it
-        bill_path.write_text(contents)
+        bill_contents = ("!paid:\n" if not paid_present else "") + contents
+        bill_path.write_text(bill_contents)
         _bill_view = self.window.open_file(str(bill_path), group=bill_group)
         # create {path}.expenses from template and open it
         expenses_path.write_text(self.get_expenses(items))
