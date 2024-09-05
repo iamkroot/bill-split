@@ -1,0 +1,5 @@
+data
+templates
+beannames.txt
+*.sublime-project
+*.sublime-workspace
