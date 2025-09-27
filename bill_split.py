@@ -73,7 +73,10 @@ def parse_bill(path: Path):
     assert (
         lines[0].strip().startswith("!paid")
     ), "First line should be paid amount directive. Eg: '!paid: 1234.00'"
-    total_paid = Fraction(lines[0].split(":")[1].strip())
+    try:
+        total_paid = Fraction(lines[0].split(":")[1].strip())
+    except ValueError:
+        raise Exception("Invalid paid directive!")
 
     # now parse the item lines
     bill_data2 = DictReader(
@@ -341,9 +344,9 @@ def gen_beancount_postings(total_paid: Fraction, totals: dict, expenses_data: st
     # start printing
     print("Beancount postings:")
     if total_name is not None:
-        print(total_name, -float(total_paid), "USD")
+        print(" ", total_name, f"-{total_paid:.2f}", "USD")
 
-    for bill_name, total in totals.items():
+    for bill_name in sorted(totals):
         if my_name is not None and bill_name == my_name[0]:
             # will print this at the end
             continue
@@ -351,10 +354,10 @@ def gen_beancount_postings(total_paid: Fraction, totals: dict, expenses_data: st
             acc_name = account_names[bill_name]
         except KeyError:    
             acc_name = bill_name
-        print(acc_name, total, "USD")
+        print(" ", acc_name, f"{totals[bill_name]:.2f}", "USD")
     if my_name is not None:
         assert my_name[0] in totals, f"My name {my_name[0]} not found in {totals=}"
-        print(my_name[1])
+        print(" ", my_name[1])
 
 
 def main():
@@ -362,6 +365,8 @@ def main():
     random.seed(str(bill_path))
     total_paid, bill = parse_bill(bill_path)
     items = parse_expenses(expenses_data)
+    # reset the seed so that shares assignment is deterministic
+    random.seed(str(bill_path))
     totals = assign_shares(items, bill)
     if BEANNAMES_FILE.exists():
         gen_beancount_postings(total_paid, totals, BEANNAMES_FILE.read_text())
