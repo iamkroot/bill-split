@@ -1,51 +1,84 @@
+from ast import Index
+from collections.abc import Iterable
 import sublime
 import sublime_plugin
 import sublime_types
 from pathlib import Path
+import os
+
+
+def _stem_with_parent(path: Path):
+    """return the "parent/filestem" for path"""
+    return path.with_suffix("")
+
+
+def _pick_path_from_known_file(folders, path: Path):
+    for fold in folders:
+        fold = Path(fold)
+        try:
+            path.relative_to(fold)
+        except ValueError:
+            continue
+        else:
+            return _stem_with_parent(path)
+    else:
+        # fallback to stem with parent
+        return _stem_with_parent(path)
+
+
+BILL_SUFFIXES = [".expenses", ".bill"]
+
+
+def _pick_with_suffix(files: Iterable[str | Path], allowed_suffixes: list[str] | None):
+    """Find first file from list that has a known suffix"""
+    for file in files:
+        path = Path(file)
+        if allowed_suffixes is None or path.suffix in allowed_suffixes:
+            return _stem_with_parent(path)
+
+
+def _find_expense_file(window: sublime.Window,  allowed_suffixes: list[str] | None):
+    """Find an expense file stem in the project.
+    
+    Has heuristics to pick a very "relevant" file.
+    """
+    if sheet := window.active_sheet():
+        # if a file is open and it is a known file, use that as base
+        if name := sheet.file_name():
+            if picked := _pick_with_suffix([name], allowed_suffixes):
+                return picked
+    # try to find the most recently opened file that we care about
+    if picked := _pick_with_suffix(window.file_history(), allowed_suffixes):
+        return picked
+    # try to find from open files
+    open_sheets = (sheet.file_name() for sheet in window.sheets())
+    open_sheets = (name for name in open_sheets if name is not None)
+    # TODO: Can also look at all files in project
+    return _pick_with_suffix(open_sheets, allowed_suffixes)
+
+
+def _select_base_path(window:sublime.Window):
+    if picked := _find_expense_file(window, BILL_SUFFIXES):
+        return picked
+    # try again without suffix filter
+    if picked := _find_expense_file(window, allowed_suffixes=None):
+        return picked
+    # TODO: try to find from project
+    # fallback to home dir
+    return Path.home()
 
 
 class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
-    KNOWN_SUFFIXES = [".expenses", ".bill"]
     EXPENSES_TEMPLATE = "bill_split_template.expenses"
 
-    @staticmethod
-    def _stem_with_parent(path: Path):
-        """return the "parent/filestem" for path"""
-        return str(path.with_suffix(""))
-
-    def _pick_path_from_known_file(self, path: Path):
-        folders = self.window.folders()
-        for fold in folders:
-            fold = Path(fold)
-            try:
-                path.relative_to(fold)
-            except ValueError:
-                continue
-            else:
-                return self._stem_with_parent(path)
-        else:
-            # fallback to stem with parent
-            return self._stem_with_parent(path)
-
     def run(self):
-        default = ""
-        if sheet := self.window.active_sheet():
-            # if a file is open and it is a known file, use that as base
-            if name := sheet.file_name():
-                path = Path(name)
-                if path.suffix in self.KNOWN_SUFFIXES:
-                    default = self._stem_with_parent(path)
-        if not default:
-            # try to find the most recently opened file that we care about
-            for file in self.window.file_history():
-                path = Path(file)
-                if path.suffix in self.KNOWN_SUFFIXES:
-                    default = self._stem_with_parent(path)
-                    break
-            else:
-                # TODO: Can also look at all files in project
-                print("could not find a valid file path")
-        self.window.show_input_panel("File path:", default, self.on_done, None, None)
+        default = _find_expense_file(self.window, BILL_SUFFIXES)
+        if default is None:
+            print("could not find a valid file path")
+            initial_text = ""
+        else:
+            initial_text = str(default)
+        self.window.show_input_panel("File path", initial_text, self.on_done, None, None)
 
     def get_expenses_template(self) -> str:
         path = Path(sublime.packages_path()) / "User" / self.EXPENSES_TEMPLATE
@@ -102,3 +135,24 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
         # create {path}.expenses from template and open it
         expenses_path.write_text(self.get_expenses(items))
         _expenses_view = self.window.open_file(str(expenses_path), group=expenses_group)
+
+
+class NewEmptyExpenseCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        if picked := _select_base_path(self.window):
+            initial_text = str(picked.parent) + os.sep
+        else:
+            initial_text = ""
+        self.window.show_input_panel("Bill path", initial_text, self.on_done, None, None)
+
+    def on_done(self, base_path_str: str):
+        base_path = Path(base_path_str)
+        # just a heuristic to not make too many directories
+        if not base_path.parent.parent.parent.exists():
+            sublime.error_message(f"Weird base path!! {base_path}")
+            # TODO: Should preserve user input and go back
+            return
+        base_path.parent.mkdir(parents=True, exist_ok=True)
+        bill_path = base_path.with_suffix(".bill")
+        self.window.open_file(str(bill_path))
+        
