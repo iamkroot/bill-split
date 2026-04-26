@@ -135,6 +135,7 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
         # create {path}.expenses from template and open it
         expenses_path.write_text(self.get_expenses(items))
         _expenses_view = self.window.open_file(str(expenses_path), group=expenses_group)
+        sublime.set_clipboard(str(path))
 
 
 class NewEmptyExpenseCommand(sublime_plugin.WindowCommand):
