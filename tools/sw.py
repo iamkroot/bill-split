@@ -58,10 +58,36 @@ class Secrets:
         return Splitwise(self.consumer_key, self.consumer_secret, api_key=self.api_key)
 
 
-def find_best_match(name, choices, cutoff=0.6):
-    """Finds the best fuzzy match for a name from a list of choices."""
-    matches = get_close_matches(name, choices, n=1, cutoff=cutoff)
-    return matches[0] if matches else None
+def resolve_user(search_name: str, members: list):
+    """Finds a user from a list of members, handling exact, prefix, and fuzzy matches."""
+    search_name = search_name.lower().strip()
+
+    def full_name(m):
+        return f"{m.first_name or ''} {m.last_name or ''}".strip().lower()
+
+    # 1. Exact match on full name
+    exact_full = [m for m in members if full_name(m) == search_name]
+    if len(exact_full) == 1: return exact_full[0]
+
+    # 2. Exact match on first name
+    exact_first = [m for m in members if (m.first_name or "").lower().strip() == search_name]
+    if len(exact_first) == 1: return exact_first[0]
+    if len(exact_first) > 1:
+        conflicts = ", ".join([full_name(m).title() for m in exact_first])
+        raise ValueError(f"Ambiguous name '{search_name}'. Matches multiple people: {conflicts}. Please use a full name or initial.")
+
+    # 3. Prefix match (e.g., 'john d' -> 'john doe')
+    prefix_matches = [m for m in members if full_name(m).startswith(search_name)]
+    if len(prefix_matches) == 1: return prefix_matches[0]
+    if len(prefix_matches) > 1:
+        conflicts = ", ".join([full_name(m).title() for m in prefix_matches])
+        raise ValueError(f"Ambiguous prefix '{search_name}'. Matches multiple people: {conflicts}.")
+
+    # 4. Fuzzy match on full name
+    name_map = {full_name(m): m for m in members}
+    matches = get_close_matches(search_name, name_map.keys(), n=1, cutoff=0.5)
+    
+    return name_map[matches[0]] if matches else None
 
 
 def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: str, date_: date, group_name: str | None = None, notes: str | None = None):
@@ -92,38 +118,39 @@ def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: s
         available_members.append(current_user)
 
     # --- Match Names to Members/Friends ---
-    # Safely filter out anyone missing a first name
-    member_names = [f"{m.first_name.lower()}" for m in available_members if m.first_name]
-    logger.debug(f"Available people to match: {', '.join(member_names[:10])}...")
+    member_names_log = [f"{m.first_name or ''} {m.last_name or ''}".strip() for m in available_members if m.first_name]
+    logger.debug(f"Available people to match: {', '.join(member_names_log)}")
 
     expense_users = []
     payer_handled_in_split = False
     
     for name, amount in user_amounts.items():
-        best_match_name = find_best_match(name.lower(), member_names)
-        if not best_match_name:
+        try:
+            matched_member = resolve_user(name, available_members)
+        except ValueError as e:
+            logger.error(str(e))
+            return False
+
+        if not matched_member:
             context = f"in the group '{group_name}'" if group_name else "among your friends"
             logger.error(f"Could not find a match for '{name}' {context}. Aborting.")
             return False
         
-        matched_member = next(
-            (m for m in available_members if m.first_name and m.first_name.lower() == best_match_name), None
-        )
+        full_matched_name = f"{matched_member.first_name or ''} {matched_member.last_name or ''}".strip()
+        logger.info(f"Matched '{name}' -> '{full_matched_name}' (User ID: {matched_member.id}) owes {amount:.2f}")
         
-        if matched_member:
-            logger.info(f"Matched '{name}' -> '{best_match_name}' (User ID: {matched_member.id}) owes {amount:.2f}")
-            user = ExpenseUser()
-            user.setId(matched_member.id)
-            user.setOwedShare(f"{amount:.2f}")
+        user = ExpenseUser()
+        user.setId(matched_member.id)
+        user.setOwedShare(f"{amount:.2f}")
+        
+        if matched_member.id == current_user.id:
+            user.setPaidShare(f"{total_expense:.2f}")
+            payer_handled_in_split = True
+            logger.info("Payer is part of the split. Their paid share is being added to their entry.")
+        else:
+            user.setPaidShare("0.00")  # Explicitly state they paid nothing to avoid API errors
             
-            if matched_member.id == current_user.id:
-                user.setPaidShare(f"{total_expense:.2f}")
-                payer_handled_in_split = True
-                logger.info("Payer is part of the split. Their paid share is being added to their entry.")
-            else:
-                user.setPaidShare("0.00")  # Explicitly state they paid nothing to avoid API errors
-                
-            expense_users.append(user)
+        expense_users.append(user)
 
     # --- Create and Add the Expense ---
     # Assumption: The API user paid the full amount.
