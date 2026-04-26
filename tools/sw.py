@@ -43,9 +43,11 @@ class Secrets:
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing configuration file at {config_path}: {e}")
             sys.exit(1)
+        
         consumer_key = config.get("consumer_key")
         consumer_secret = config.get("consumer_secret")
         api_key = config.get("api_key")
+        
         if not all([consumer_key, consumer_secret, api_key]):
             logger.error(f"One or more API credentials missing in {config_path}. Ensure 'consumer_key', 'consumer_secret', and 'api_key' are set.")
             sys.exit(1)
@@ -62,42 +64,50 @@ def find_best_match(name, choices, cutoff=0.6):
     return matches[0] if matches else None
 
 
-def create_expense(sw: Splitwise, group_name: str, user_amounts: dict[str, float], description: str, date_: date, notes: str | None = None):
+def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: str, date_: date, group_name: str | None = None, notes: str | None = None):
     current_user = sw.getCurrentUser()
     logger.debug(f"Successfully authenticated as: {current_user.first_name} {current_user.last_name} (ID: {current_user.id})")
 
     total_expense = sum(user_amounts.values())
     logger.info(f"Total expense amount calculated: {total_expense:.2f}")
 
-    # --- Find the Group ---
-    groups = sw.getGroups()
-    target_group = next((g for g in groups if g.name.lower() == group_name.lower()), None)
+    available_members = []
+    target_group = None
 
-    if not target_group:
-        logger.error(f"Group '{group_name}' not found.")
-        return False
-    logger.info(f"Found group: '{target_group.name}' (ID: {target_group.id})")
+    if group_name:
+        # --- Find the Group ---
+        groups = sw.getGroups()
+        target_group = next((g for g in groups if g.name.lower() == group_name.lower()), None)
 
-    # --- Match Names to Group Members ---
-    group_members = target_group.members
-    group_member_names = [f"{member.first_name.lower()}" for member in group_members]
-    logger.debug(f"Available group members: {', '.join(group_member_names)}")
+        if not target_group:
+            logger.error(f"Group '{group_name}' not found.")
+            return False
+        logger.info(f"Found group: '{target_group.name}' (ID: {target_group.id})")
+        available_members = target_group.members
+    else:
+        # --- Find Friends (Non-Group Expense) ---
+        logger.info("No group specified. Fetching friends for direct expense...")
+        available_members = sw.getFriends()
+        # Ensure the current user is in the searchable pool so they can owe money too
+        available_members.append(current_user)
 
-    # The user who paid the expense
-    paid_user = ExpenseUser()
-    paid_user.setId(current_user.id)
-    paid_user.setPaidShare(f"{total_expense:.2f}")
+    # --- Match Names to Members/Friends ---
+    # Safely filter out anyone missing a first name
+    member_names = [f"{m.first_name.lower()}" for m in available_members if m.first_name]
+    logger.debug(f"Available people to match: {', '.join(member_names[:10])}...")
 
     expense_users = []
     payer_handled_in_split = False
+    
     for name, amount in user_amounts.items():
-        best_match_name = find_best_match(name.lower(), group_member_names)
+        best_match_name = find_best_match(name.lower(), member_names)
         if not best_match_name:
-            logger.error(f"Could not find a match for '{name}' in the group. Aborting.")
+            context = f"in the group '{group_name}'" if group_name else "among your friends"
+            logger.error(f"Could not find a match for '{name}' {context}. Aborting.")
             return False
         
         matched_member = next(
-            (m for m in group_members if m.first_name.lower() == best_match_name), None
+            (m for m in available_members if m.first_name and m.first_name.lower() == best_match_name), None
         )
         
         if matched_member:
@@ -105,10 +115,14 @@ def create_expense(sw: Splitwise, group_name: str, user_amounts: dict[str, float
             user = ExpenseUser()
             user.setId(matched_member.id)
             user.setOwedShare(f"{amount:.2f}")
+            
             if matched_member.id == current_user.id:
                 user.setPaidShare(f"{total_expense:.2f}")
                 payer_handled_in_split = True
                 logger.info("Payer is part of the split. Their paid share is being added to their entry.")
+            else:
+                user.setPaidShare("0.00")  # Explicitly state they paid nothing to avoid API errors
+                
             expense_users.append(user)
 
     # --- Create and Add the Expense ---
@@ -116,25 +130,28 @@ def create_expense(sw: Splitwise, group_name: str, user_amounts: dict[str, float
     expense = Expense()
     expense.setCost(f"{total_expense:.2f}")
     expense.setDescription(description)
+    
     if date_:
         expense.setDate(date_)
-    expense.setGroupId(target_group.id)
+        
+    if target_group:
+        expense.setGroupId(target_group.id)
+        
     # Add notes if provided
     if notes:
         expense.setDetails(notes)
         logger.debug(f"Adding notes to the expense:\n{notes}\n***")
     
-    expense.setUsers(expense_users)
     # If the payer was not in the amounts_dict, create a separate entry for them.
-    # This handles the case where the payer owes nothing.
     if not payer_handled_in_split:
         logger.info("Payer is not part of the split. Creating a separate entry for the payer.")
         paid_user = ExpenseUser()
         paid_user.setId(current_user.id)
         paid_user.setPaidShare(f"{total_expense:.2f}")
-        
-        # Add the payer to the list of users involved in the expense
-        expense.addUser(paid_user)
+        paid_user.setOwedShare("0.00")
+        expense_users.append(paid_user)
+
+    expense.setUsers(expense_users)
 
     logger.info("Creating expense on Splitwise...")
     created_expense, errors = sw.createExpense(expense)
@@ -152,15 +169,20 @@ def create_expense(sw: Splitwise, group_name: str, user_amounts: dict[str, float
 def main():
     """Main function to parse arguments and create a Splitwise expense."""
     parser = argparse.ArgumentParser(
-        description="Add a new expense to a Splitwise group with exact amounts for each person.",
+        description="Add a new expense to Splitwise (with a group or directly with friends) with exact amounts.",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument("group_name", help="The name of the Splitwise group (e.g., 'Apartment').")
-    parser.add_argument("description", help="A description for the expense (e.g., 'Groceries').")
+    
+    parser.add_argument("description", help="A description for the expense (e.g., 'Dinner').")
     parser.add_argument(
         "amounts_dict",
         help="A Python dictionary string mapping short names to the exact amount they owe. \n"
              "Example: \"{'john': 10.50, 'jane': 15.75, 'bob': 5.00}\""
+    )
+    parser.add_argument(
+        "-g", "--group", 
+        help="Optional: The name of the Splitwise group (e.g., 'Apartment'). If omitted, checks against your Friends.",
+        default=None
     )
     parser.add_argument("--notes", help="Optional notes or details for the expense.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
@@ -181,7 +203,7 @@ def main():
 
     try:
         sw = Secrets.from_path(CONFIG_PATH).sw()
-        if not create_expense(sw, args.group_name, user_amounts, args.description, args.date, args.notes):
+        if not create_expense(sw, user_amounts, args.description, args.date, args.group, args.notes):
             sys.exit(1)
     except SplitwiseNotFoundException:
         logger.error("Splitwise authentication failed. Check your API credentials.")
