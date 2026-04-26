@@ -16,7 +16,7 @@ from splitwise import Splitwise, SplitwiseNotFoundException
 from splitwise.expense import Expense
 from splitwise.user import ExpenseUser
 from pathlib import Path
-from datetime import date
+from datetime import datetime as dt, timezone
 
 # --- Setup Logging ---
 # The default logging level is INFO. Use --debug for more verbose output.
@@ -90,7 +90,7 @@ def resolve_user(search_name: str, members: list):
     return name_map[matches[0]] if matches else None
 
 
-def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: str, date_: date, group_name: str | None = None, notes: str | None = None):
+def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: str, date_: dt, group_name: str | None = None, notes: str | None = None):
     current_user = sw.getCurrentUser()
     logger.debug(f"Successfully authenticated as: {current_user.first_name} {current_user.last_name} (ID: {current_user.id})")
 
@@ -193,6 +193,15 @@ def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: s
     return created_expense.id
 
 
+def parse_datetime_arg(val: str) -> dt:
+    """Parses an ISO date or datetime, assumes local if naive, returns UTC datetime."""
+    try:
+        dt_ = dt.fromisoformat(val)
+        return dt_.astimezone(timezone.utc)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid date/time format: '{val}'. Use ISO 8601 (e.g., YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).")
+
+
 def main():
     """Main function to parse arguments and create a Splitwise expense."""
     parser = argparse.ArgumentParser(
@@ -213,7 +222,7 @@ def main():
     )
     parser.add_argument("--notes", help="Optional notes or details for the expense.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
-    parser.add_argument("--date", type=date.fromisoformat, default=date.today(), help="Optional date of the transaction.")
+    parser.add_argument("--date", type=parse_datetime_arg, default=dt.now(timezone.utc), help="Optional datetime of the transaction.")
     args = parser.parse_args()
 
     if args.debug:
