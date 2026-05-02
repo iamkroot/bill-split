@@ -3,3 +3,4 @@ templates
 beannames.txt
 *.sublime-project
 *.sublime-workspace
+__pycache__

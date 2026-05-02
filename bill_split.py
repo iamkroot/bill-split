@@ -78,8 +78,7 @@ def parse_bill(path: Path):
     # adjust the prices based on actual amount paid
     item_sum = sum(item.price for item in items)
     price_mult = total_paid / item_sum
-    print(f"bill sum: {float(item_sum):.2f}")
-    return total_paid, [item.scale_price(price_mult) for item in items]
+    return total_paid, [item.scale_price(price_mult) for item in items], item_sum
 
 
 EVERYONE_NAME = "@everyone"
@@ -242,7 +241,6 @@ def is_sampler(name):
 def round_totals(shares):
     """Handle float roundoff errors that cause shares to not sum to the total"""
     total = float(sum(shares.values()))
-    print("total", total)
     totals = {name: round(float(share), 2) for name, share in shares.items()}
     delta = round(sum(totals.values()) - total, 2)
     if delta != 0:
@@ -275,16 +273,7 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
             details[person][bill_item.name] = share
 
     totals = round_totals(shares)
-    pprint(totals)
-    pprint(
-        dict(
-            {
-                p: {n: round(float(v), 2) for n, v in items.items()}
-                for p, items in details.items()
-            }
-        )
-    )
-    return totals
+    return totals, details
 
 
 def gen_beancount_postings(total_paid: Fraction, totals: dict, expenses_data: str):
@@ -370,8 +359,8 @@ def parse_args():
         expenses_path = args.base_path.with_suffix(".expenses")
 
     elif args.bill_path and args.expenses_path:
-        bill_path = args.bill_path
-        expenses_path = args.expenses_path
+        bill_path: Path = args.bill_path
+        expenses_path: Path = args.expenses_path
     else:
         parser.error("You must provide either --base-path OR BOTH --bill-path and --expenses-path.")
 
@@ -383,11 +372,23 @@ def main():
     bill_path, expenses_data, beannames = parse_args()
     # make the RNG consistent for a given bill
     random.seed(str(bill_path))
-    total_paid, bill = parse_bill(bill_path)
+    total_paid, bill, bill_sum = parse_bill(bill_path)
+    print(f"bill sum: {float(bill_sum):.2f}")
+
     items = parse_expenses(expenses_data)
     # reset the seed so that shares assignment is deterministic
     random.seed(str(bill_path))
-    totals = assign_shares(items, bill)
+    totals, details = assign_shares(items, bill)
+    print(f"total: {sum(totals.values()):.2f}")
+    pprint(totals)
+    pprint(
+        dict(
+            {
+                p: {n: round(float(v), 2) for n, v in items.items()}
+                for p, items in details.items()
+            }
+        )
+    )
     if beannames.exists():
         gen_beancount_postings(total_paid, totals, beannames.read_text())
 
