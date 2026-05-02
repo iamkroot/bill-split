@@ -29,14 +29,10 @@ def main():
     totals, details = bill_split.assign_shares(items, bill)
     print(f"total: {sum(totals.values()):.2f}")
     pprint(totals)
-    detail_pp = pformat(
-        dict(
-            {
-                p: {n: round(float(v), 2) for n, v in items.items()}
-                for p, items in details.items()
-            }
-        )
-    )
+    detail_pp = pformat({
+        p: {n: round(float(v), 2) for n, v in items.items()}
+        for p, items in details.items()
+    })
     print(detail_pp)
     if beannames.exists():
         bill_split.gen_beancount_postings(total_paid, totals, beannames.read_text())

@@ -381,14 +381,10 @@ def main():
     totals, details = assign_shares(items, bill)
     print(f"total: {sum(totals.values()):.2f}")
     pprint(totals)
-    pprint(
-        dict(
-            {
-                p: {n: round(float(v), 2) for n, v in items.items()}
-                for p, items in details.items()
-            }
-        )
-    )
+    pprint({
+        p: {n: round(float(v), 2) for n, v in items.items()}
+        for p, items in details.items()
+    })
     if beannames.exists():
         gen_beancount_postings(total_paid, totals, beannames.read_text())
 
