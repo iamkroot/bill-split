@@ -30,6 +30,7 @@ Final output will be each person's share to the total amount in the bill.
 import csv
 import re
 import random
+from argparse import ArgumentParser
 from collections import Counter, defaultdict
 from csv import DictReader
 from dataclasses import dataclass
@@ -38,21 +39,6 @@ from fractions import Fraction
 from pathlib import Path
 from pprint import pprint
 from typing import Iterable
-
-# These are the ONLY variables that you need to change.
-# could even be a file inside a directory, like "./bills/Greed Island/foo"
-# just ensure that foo.bill and foo.expenses exist in that directory
-BASE_PATH = Path("sample")
-# This file specifies a mapping from expenses name (like "kurapika") to a 
-# beancount account name (like "Assets:Receivable:Friends:Kurapika")
-# Used to autogenerate the beancount posting for this txns.
-# 
-# Completely optional. Will be skipped if this file is not found.
-BEANNAMES_FILE = Path("beannames.txt")
-
-# no need to edit any of these
-bill_path = BASE_PATH.with_suffix(".bill")
-expenses_data = BASE_PATH.with_suffix(".expenses").read_text()
 
 
 @dataclass
@@ -360,7 +346,41 @@ def gen_beancount_postings(total_paid: Fraction, totals: dict, expenses_data: st
         print(" ", my_name[1])
 
 
+def parse_args():
+    parser = ArgumentParser('bill_split.py', description=__doc__)
+    main_g = parser.add_argument_group("Main files")
+    main_g.add_argument("--base-path", type=Path, help="Base path to derive .bill and .expenses files")
+    main_g.add_argument("--bill-path", type=Path, help="Exact path to the bill TSV file")
+    main_g.add_argument("--expenses-path", type=Path, help="Exact path to the expenses contribution file")
+
+    parser.add_argument("--beannames", type=Path, default=Path("beannames.txt"), help='''
+        This file specifies a mapping from expenses name (like "kurapika") to a 
+        beancount account name (like "Assets:Receivable:Friends:Kurapika")
+        Used to autogenerate the beancount posting for this txns.
+
+        Completely optional. Will be skipped if this file is not found.
+    ''')
+
+    args = parser.parse_args()
+    if args.base_path:
+        if args.bill_path or args.expenses_path:
+            parser.error("Cannot mix --base-path with --bill-path or --expenses-path.")
+        
+        bill_path = args.base_path.with_suffix(".bill")
+        expenses_path = args.base_path.with_suffix(".expenses")
+
+    elif args.bill_path and args.expenses_path:
+        bill_path = args.bill_path
+        expenses_path = args.expenses_path
+    else:
+        parser.error("You must provide either --base-path OR BOTH --bill-path and --expenses-path.")
+
+    expenses_data = expenses_path.read_text()    
+    return bill_path, expenses_data, args.beannames
+
+
 def main():
+    bill_path, expenses_data, beannames = parse_args()
     # make the RNG consistent for a given bill
     random.seed(str(bill_path))
     total_paid, bill = parse_bill(bill_path)
@@ -368,8 +388,8 @@ def main():
     # reset the seed so that shares assignment is deterministic
     random.seed(str(bill_path))
     totals = assign_shares(items, bill)
-    if BEANNAMES_FILE.exists():
-        gen_beancount_postings(total_paid, totals, BEANNAMES_FILE.read_text())
+    if beannames.exists():
+        gen_beancount_postings(total_paid, totals, beannames.read_text())
 
 
 if __name__ == '__main__':
