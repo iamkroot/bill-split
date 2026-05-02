@@ -80,21 +80,40 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
             initial_text = str(default)
         self.window.show_input_panel("File path", initial_text, self.on_done, None, None)
 
-    def get_expenses_template(self) -> str:
-        path = Path(sublime.packages_path()) / "User" / self.EXPENSES_TEMPLATE
-        # TODO: Allow setting this path from a config
-        if not path.exists():
-            return ""
-        return path.read_text()
+    def get_expenses_template(self, input_path: str):
+        """Looks for a "templates" dir in window and asks user to choose a file from there."""
+        dirs = []
+        for folder in self.window.folders():
+            templates_dir = Path(folder) / "templates"
+            if templates_dir.exists():
+                dirs.append(templates_dir)
 
-    def get_expenses(self, items: sublime_types.List[str]) -> str:
-        expenses_template = self.get_expenses_template()
+        if len(dirs) == 1:
+            files = [(file, file.stem) for file in dirs[0].iterdir() if file.suffix == ".expenses"]
+        else:
+            files = [(file, str(file)) for tdir in dirs for file in tdir.iterdir() if file.suffix == ".expenses"]
+        if not files:
+            default = Path(sublime.packages_path()) / "User" / self.EXPENSES_TEMPLATE
+            # TODO: Allow setting this path from a config
+            files = [(default, default.stem)]
+
+        def clip_listener(files, x):
+            sublime.get_clipboard_async(lambda d: self.on_bill_contents(Path(input_path), d, files[x][0]))
+
+        if len(files) == 1:
+            clip_listener(files, 0)
+        else:
+            self.window.show_quick_panel([f[1] for f in files], on_select=lambda x: clip_listener(files, x))
+
+
+    def get_expenses(self, items: list[str], template: Path) -> str:
+        expenses_template = template.read_text() if template.exists() else ""
         # TODO: Can put some smartness here to auto-categorize the 
         expenses_template += "\n".join(items)
         return expenses_template
 
     def on_done(self, path: str):
-        sublime.get_clipboard_async(lambda d: self.on_bill_contents(Path(path), d))
+        self.get_expenses_template(path)        
 
     @staticmethod
     def get_bill_items(contents: str):
@@ -110,7 +129,7 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
                     items.append(item)
         return items
 
-    def on_bill_contents(self, path: Path, contents: str):
+    def on_bill_contents(self, path: Path, contents: str, template: Path):
         """Create the new path.bill and path.expenses files based on contents of bill."""
         paid_present = False
         if contents.strip().startswith("!paid:"):
@@ -125,15 +144,15 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
 
         path.parent.mkdir(parents=True, exist_ok=True)
         bill_path, expenses_path = path.with_suffix(".bill"), path.with_suffix(".expenses")
+
         # assign to proper groups if they are open side-by-side
         bill_group, expenses_group = ((-1, -1), (0, 1))[self.window.num_groups() == 2]
-
         # create {path}.bill from contents and open it
         bill_contents = ("!paid:\n" if not paid_present else "") + contents
         bill_path.write_text(bill_contents)
         _bill_view = self.window.open_file(str(bill_path), group=bill_group)
         # create {path}.expenses from template and open it
-        expenses_path.write_text(self.get_expenses(items))
+        expenses_path.write_text(self.get_expenses(items, template))
         _expenses_view = self.window.open_file(str(expenses_path), group=expenses_group)
         sublime.set_clipboard(str(path))
 
