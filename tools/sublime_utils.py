@@ -1,10 +1,9 @@
-from ast import Index
-from collections.abc import Iterable
 import sublime
 import sublime_plugin
-import sublime_types
-from pathlib import Path
 import os
+import json
+from collections.abc import Iterable
+from pathlib import Path
 
 
 def _stem_with_parent(path: Path):
@@ -27,6 +26,8 @@ def _pick_path_from_known_file(folders, path: Path):
 
 
 BILL_SUFFIXES = [".expenses", ".bill"]
+CACHE_PATH = Path(sublime.cache_path()) / "bill_split"
+CACHE_PATH.mkdir(exist_ok=True)
 
 
 def _pick_with_suffix(files: Iterable[str | Path], allowed_suffixes: list[str] | None):
@@ -70,6 +71,7 @@ def _select_base_path(window:sublime.Window):
 
 class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
     EXPENSES_TEMPLATE = "bill_split_template.expenses"
+    TEMPLATE_HIST = CACHE_PATH / "template_hist.json"
 
     def run(self):
         default = _find_expense_file(self.window, BILL_SUFFIXES)
@@ -81,30 +83,68 @@ class PromptNewFromClipboardCommand(sublime_plugin.WindowCommand):
         self.window.show_input_panel("File path", initial_text, self.on_done, None, None)
 
     def get_expenses_template(self, input_path: str):
-        """Looks for a "templates" dir in window and asks user to choose a file from there."""
-        dirs = []
+        """Looks for a 'templates' dir in window and asks user to choose a file from there."""
+        
+        # 1. Gather all .expenses templates from open folders
+        files = []
         for folder in self.window.folders():
             templates_dir = Path(folder) / "templates"
-            if templates_dir.exists():
-                dirs.append(templates_dir)
+            if templates_dir.is_dir():
+                files.extend(templates_dir.glob("*.expenses"))
 
-        if len(dirs) == 1:
-            files = [(file, file.stem) for file in dirs[0].iterdir() if file.suffix == ".expenses"]
-        else:
-            files = [(file, str(file)) for tdir in dirs for file in tdir.iterdir() if file.suffix == ".expenses"]
+        # 2. Fallback to default if no templates are found
         if not files:
-            default = Path(sublime.packages_path()) / "User" / self.EXPENSES_TEMPLATE
-            # TODO: Allow setting this path from a config
-            files = [(default, default.stem)]
+            default_path = Path(sublime.packages_path()) / "User" / self.EXPENSES_TEMPLATE
+            files = [default_path]
 
-        def clip_listener(files, x):
-            sublime.get_clipboard_async(lambda d: self.on_bill_contents(Path(input_path), d, files[x][0]))
+        # 3. Load History & Apply Frecency Sort
+        template_hist = json.loads(self.TEMPLATE_HIST.read_bytes() if self.TEMPLATE_HIST.exists() else b"[]")
+        hist_len = len(template_hist)
 
+        def get_frecency_score(file_path: Path) -> float:
+            path_str = str(file_path)
+            # Find all indexes where this path appears in the history
+            occurrences = [i for i, p in enumerate(template_hist) if p == path_str]
+            
+            if not occurrences:
+                return -1  # Never used, sink to the bottom
+
+            # Frequency: 10 points per use
+            freq_score = len(occurrences) * 10
+            # Recency: Up to 50 points based on how close to the end of the list it is
+            recency_score = (occurrences[-1] / hist_len) * 50 
+            
+            return freq_score + recency_score
+
+        # Sort files highest score to lowest
+        files.sort(key=get_frecency_score, reverse=True)
+
+        # 4. Define the action to take once a file is chosen
+        def process_template(template_path: Path):
+            template_hist.append(str(template_path))
+            self.TEMPLATE_HIST.write_text(json.dumps(template_hist[-100:]))
+            sublime.get_clipboard_async(
+                lambda clipboard_data: self.on_bill_contents(Path(input_path), clipboard_data, template_path)
+            )
+
+        # 5. Execute or prompt the user
         if len(files) == 1:
-            clip_listener(files, 0)
+            process_template(files[0])
         else:
-            self.window.show_quick_panel([f[1] for f in files], on_select=lambda x: clip_listener(files, x))
+            # Disambiguate names only if templates come from multiple different directories
+            unique_dirs = len({f.parent for f in files})
+            display_items = [
+                f.stem if unique_dirs == 1 else f"{f.parent.parent.name}/{f.stem}" 
+                for f in files
+            ]
+            
+            def on_done(index):
+                if index != -1:
+                    process_template(files[index])
+                else:
+                    self.window.status_message("Cancelled!")
 
+            self.window.show_quick_panel(display_items, on_done)
 
     def get_expenses(self, items: list[str], template: Path) -> str:
         expenses_template = template.read_text() if template.exists() else ""
