@@ -126,7 +126,7 @@ def create_expense(sw: Splitwise, user_amounts: dict[str, float], description: s
     
     for name, amount in user_amounts.items():
         try:
-            matched_member = resolve_user(name, available_members)
+            matched_member = resolve_user(name, available_members) if name != "me" else current_user
         except ValueError as e:
             logger.error(str(e))
             return False
