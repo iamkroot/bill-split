@@ -3,7 +3,7 @@
     let total = document.querySelector("div.bill-order-total-payment").textContent.slice(6)
     let mainCont = document.querySelector("[data-testid='orderInfoCard']")
     let items = mainCont.querySelectorAll("a[link-identifier='itemClick']")
-    let qts = mainCont.querySelectorAll("div.bill-item-quantity")
+    let qts = Array.from(mainCont.querySelectorAll("[data-testid=itemtile-stack]")).map(d=>d.querySelector("div.bill-item-quantity"))
     let prices = mainCont.querySelectorAll("div[data-testid='line-price']")
     let imgs = mainCont.querySelectorAll("img[data-testid='productTileImage']")
     if (items.length != qts.length || qts.length != prices.length || prices.length != imgs.length) {
