@@ -263,6 +263,9 @@ def assign_shares(items: dict[str, Counter[str]], bill: list[BillItem]):
         if is_sampler(bill_item.name):
             candidates = samplers
         matches = get_close_matches(bill_item.name, candidates, n=1, cutoff=0.5)
+        if not matches:
+            # look for prefix match
+            matches = [cand for cand in candidates if cand.startswith(bill_item.name) or bill_item.name.startswith(cand)]
         assert matches, f"no match for {bill_item} in {', '.join(candidates)}"
         people = items[matches[0]]
         assert people.total(), f"No person for {bill_item}"
