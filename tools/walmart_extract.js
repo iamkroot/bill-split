@@ -11,13 +11,13 @@
         return
     }
     let price_regex = /\$\d+(\.\d+)?/
-    final = Array.from(items).map((it, i) => ({
+    let final = Array.from(items).map((it, i) => ({
         name: it.textContent,
         qty: qts[i].innerText.slice(4),
         price: prices[i].firstChild.textContent.match(price_regex)[0].slice(1),
         unavailable: imgs[i].classList.contains("o-30"),
     }))
     .filter(it => !it.unavailable)
-    res = final.map(f => `${f.qty}\t${f.name}\t${f.price}`).join('\n')
+    .map(f => `${f.qty}\t${f.name}\t${f.price}`).join('\n')
     copy(`!paid: ${total}\n!paid-by: krut\n\n${res}\n`)
 })()
