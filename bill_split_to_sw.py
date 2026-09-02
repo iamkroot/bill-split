@@ -1,11 +1,22 @@
-#!/usr/bin/python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "falx",
+# ]
+# [tool.uv.sources]
+# falx = { path = "../fin/falx", editable = true }
+# ///
 """Auto creates a split expense on Splitwise.
 
 Uses bill_split.py to do actual splitting.
-And sw.py to do the posting.
+And falx util sw to do the posting.
 """
 
+import os
+import sys
 import re
+import argparse
 import bill_split
 import subprocess as sp
 import random
@@ -13,8 +24,40 @@ from datetime import date
 from pathlib import Path
 from pprint import pprint, pformat
 
-SW_SCRIPT = Path(__file__).parent / "tools" / "sw.py"
-assert SW_SCRIPT.exists(), SW_SCRIPT
+
+def get_falx_config():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "-c",
+        "--falx-config",
+        "--config",
+        dest="falx_config",
+        type=Path,
+        default=Path(os.environ["FALX_CONFIG"]) if "FALX_CONFIG" in os.environ else None,
+        help="Path to falx.toml",
+    )
+    parser.add_argument(
+        "--fin-dir",
+        dest="fin_dir",
+        type=Path,
+        default=Path(os.environ["FIN_DIR"]) if "FIN_DIR" in os.environ else None,
+        help="Path to fin directory containing falx.toml",
+    )
+    args, remaining_argv = parser.parse_known_args()
+    sys.argv = [sys.argv[0], *remaining_argv]
+
+    if "-h" in sys.argv or "--help" in sys.argv:
+        return None
+
+    if args.falx_config:
+        config = Path(args.falx_config).expanduser().resolve()
+    elif args.fin_dir:
+        config = (Path(args.fin_dir).expanduser().resolve() / "falx.toml")
+    else:
+        raise KeyError("FALX_CONFIG or FIN_DIR (via flag or environment variable) is required")
+
+    assert config.exists(), f"Falx config not found at: {config}"
+    return config
 
 
 def get_info_from_path(bill_path: Path):
@@ -29,6 +72,7 @@ def get_info_from_path(bill_path: Path):
 
 
 def main():
+    falx_config = get_falx_config()
     bill_path, expenses_data, beannames = bill_split.parse_args()
     # make the RNG consistent for a given bill
     random.seed(str(bill_path))
@@ -53,11 +97,16 @@ def main():
     pathinfo = get_info_from_path(bill_path)
     info = pathinfo | {m['key']: m['val'] for m in PAT.finditer(expenses_data)}
     sw_cmd = [
-        SW_SCRIPT,
+        "falx",
+        "util",
+        "sw",
+        "-c",
+        str(falx_config),
+        "create-expense",
         info.get("desc", "Bill Split"),
         str(totals),
         "--notes",
-        f"{'\n'.join(line for line in expenses_data.splitlines() if not PAT.match(line))}\n\n{detail_pp}"
+        f"{'\n'.join(line for line in expenses_data.splitlines() if not PAT.match(line))}\n\n{detail_pp}",
     ]
     if group := info.get("group"):
         sw_cmd += ["-g", group]
